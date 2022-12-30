@@ -2,10 +2,12 @@
   "ExpandedNodes": [
     "",
     "\\functional",
+    "\\functional\\src",
+    "\\functional\\__test__",
     "\\oo",
     "\\oo\\src",
     "\\oo\\__test__"
   ],
-  "SelectedNode": "\\oo\\src\\tsconfig.json",
+  "SelectedNode": "\\functional\\src\\board.ts",
   "PreviewInSolutionExplorer": false
 }

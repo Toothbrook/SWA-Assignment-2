@@ -128,7 +128,7 @@ export class Board<T>
         const colMatches = this.FindColMatches();
         if (rowMatches.length || colMatches.length) {
             this.DestroyMatchedTilePieces(rowMatches, colMatches);
-            this.UpdateBoard
+            this.UpdateBoard()
         }
     }
 
