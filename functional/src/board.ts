@@ -5,43 +5,49 @@ export type Position = {
     col: number;
 };
 
-export enum CHECK_DIRECTION {
-    LEFT = `Left`,
-    RIGHT = `Right`,
-    TOP = `Top`,
-    DOWN = `Down`,
-}
-
 export type Match<T> = {
     matched: T;
     positions: Position[];
 };
 
-export type Piece<T> = {
-    value: T;
+export enum DIRECTION {
+    UP = "Up",
+    DOWN = "Down",
+    LEFT = "Left",
+    RIGHT = "Right"
+}
+
+export type TilePiece<T> = {
     position: Position;
+    value: T;
 };
 
+export type RemoveMatches<T> = (
+    rowMatches: TilePiece<T>[],
+    columnMatches: TilePiece<T>[]
+) => void;
+
+// ! Q3 (object and array, primitive)
 export type Board<T> = {
     width: number;
     height: number;
-    pieces: Piece<T>[];
-};
-
-export type Effect<T> = {
-    kind: string;
-    board?: Board<T>;
-    match?: Match<T>;
+    tilePieces: TilePiece<T>[];
 };
 
 export type MatchResult<T> = {
-    effects: Effect<T>[];
-    matches: Piece<T>[];
+    boardEffects: BoardEffect<T>[];
+    matches: TilePiece<T>[];
 };
 
 export type MoveResult<T> = {
     board: Board<T>;
-    effects: Effect<T>[];
+    boardEffects: BoardEffect<T>[];
+};
+
+export type BoardEffect<T> = {
+    kind: string;
+    board?: Board<T>;
+    match?: Match<T>;
 };
 
 /* ----------------------------- GIVEN FUNCTIONS ---------------------------- */
@@ -54,138 +60,63 @@ export function create<T>(
     return {
         width,
         height,
-        pieces: initBoardFill(generator, height, width),
+        tilePieces: Init(generator, height, width),
     };
 }
 
-export function piece<T>(board: Board<T>, p: Position): T | undefined {
-    if (!isPositionOutsideBoard(board, p)) {
+export function tilePiece<T>(board: Board<T>, p: Position): T | undefined {
+    if (!IsPositionOutsideBoard(board, p)) {
         return undefined;
     }
-    return findPieceOnPosition(board, p).value;
+    return FindTilePieceOnPosition(board, p).value;
 }
 
 export function canMove<T>(
     board: Board<T>,
-    first: Position,
-    second: Position
+    originalPosition: Position,
+    newPosition: Position
 ): boolean {
-    return isMoveLegal(board, first, second);
+    return IsMoveLegal(board, originalPosition, newPosition);
 }
 
 export function move<T>(
     generator: Generator<T>,
     board: Board<T>,
-    first: Position,
-    second: Position
+    originalPosition: Position,
+    newPosition: Position
 ): MoveResult<T> {
-    if (isMoveLegal(board, first, second)) {
-        swapPieces(board, first, second);
-        const effects = [];
-        scanBoard(board, generator, effects);
+    if (IsMoveLegal(board, originalPosition, newPosition)) {
+        SwapPieces(board, originalPosition, newPosition);
+        const boardEffects = [];
+        CheckBoard(board, generator, boardEffects, MatchValuesRemoved);
 
         return {
             board,
-            effects,
+            boardEffects,
         };
     }
 
     return {
         board,
-        effects: [],
+        boardEffects: [],
     };
 }
 
-/* -------------------------------------------------------------------------- */
-/*                          MOVING AND REFILING PART                          */
-/* -------------------------------------------------------------------------- */
-
-/* ----------------------- COLUMN MATCHES WITH RECURSTION ---------------------- */
-
-/**
- * Searchs for matches in all rows of the board.
- * @param board the given board
- * @returns matches with all occured effects
- */
-function getAllColumnMatches<T>(board: Board<T>): MatchResult<T> {
-    let matches: Piece<T>[] = [];
-    let effects: Effect<T>[] = [];
-    for (let i = board.width; i >= 0; i--) {
-        const checkedValues: T[] = [];
-        const elementsInColumn = getAllPiecesInColumn(board, i);
-        for (const element of elementsInColumn) {
-            if (!checkedValues.includes(element.value)) {
-                checkedValues.push(element.value);
-                const result = columnDeepNeighbourCheck(board, element);
-                matches = matches.concat(result.matches);
-                effects = effects.concat(result.effects);
-            }
-        }
-    }
-    return {
-        matches,
-        effects,
-    };
-}
-/**
- * Searches for matches on the top and bottom of the given element. And fires event when enabled.
- * @param board
- * @param startPiece the given start element
- * @returns matches with effects
- */
-function columnDeepNeighbourCheck<T>(
-    board: Board<T>,
-    startPiece: Piece<T>
-): MatchResult<T> {
-    const nextTopPosition = findNextPiecePosition(
-        startPiece,
-        CHECK_DIRECTION.TOP
-    );
-    const pieceOnNextTopPosition = findPieceOnPosition(board, nextTopPosition);
-    const topElements = neighourCheck(
-        board,
-        pieceOnNextTopPosition,
-        [],
-        startPiece.value,
-        CHECK_DIRECTION.TOP
-    );
-    const downElements = neighourCheck(
-        board,
-        findPieceOnPosition(
-            board,
-            findNextPiecePosition(startPiece, CHECK_DIRECTION.DOWN)
-        ),
-        [],
-        startPiece.value,
-        CHECK_DIRECTION.DOWN
-    );
-
-    if (topElements.length + downElements.length + 1 >= 3) {
-        const matchedPieces = [...topElements, startPiece, ...downElements];
-        return generateMatchEffect(matchedPieces);
-    }
-
-    return {
-        effects: [],
-        matches: [],
-    };
-}
-
-function refillBoard<T>(
+function UpdateBoard<T>(
     board: Board<T>,
     generator: Generator<T>,
-    effects: Effect<T>[]
+    effects: BoardEffect<T>[]
 ) {
     for (let row = 0; row < board.height; row++) {
         for (let col = 0; col < board.width; col++) {
-            const foundElement = findPieceOnPosition(board, { row, col });
+            const foundElement = FindTilePieceOnPosition(board, { row, col });
             if (foundElement.value === undefined) {
-                shiftElementsInColumn(
+                ShiftElementsInColumn(
                     board,
                     foundElement.position.row,
                     foundElement.position.col
                 );
-                findPieceOnPosition(board, {
+                FindTilePieceOnPosition(board, {
                     row: 0,
                     col: foundElement.position.col,
                 }).value = generator.next();
@@ -197,106 +128,227 @@ function refillBoard<T>(
         board,
     });
 
-    scanBoard(board, generator, effects);
+    CheckBoard(board, generator, effects, MatchValuesRemoved);
 }
 
-function shiftElementsInColumn<T>(
-    board: Board<T>,
-    fromRow: number,
-    col: number
-): void {
-    for (let row = fromRow; row > 0; row--) {
-        swapPieces(board, { row, col }, { row: row - 1, col });
-    }
-}
-
-/**
- * Return the position of the next element based on the given direction and given piece
- * @param currentPiece the piece to compare with
- * @param direction the direction to find next piece
- * @returns the postion of the found next piece
- */
-function findNextPiecePosition<T>(
-    currentPiece: Piece<T>,
-    direction: CHECK_DIRECTION
-) {
-    let position: Position = {
-        row: currentPiece.position.row,
-        col: currentPiece.position.col,
-    };
-    if (direction === CHECK_DIRECTION.DOWN) {
-        position.row += 1;
-    }
-
-    if (direction === CHECK_DIRECTION.TOP) {
-        position.row -= 1;
-    }
-
-    if (direction === CHECK_DIRECTION.LEFT) {
-        position.col -= 1;
-    }
-
-    if (direction === CHECK_DIRECTION.RIGHT) {
-        position.col += 1;
-    }
-    return position;
-}
-
-/* ----------------------- ROW MATCHES WITH RECURSTION ---------------------- */
-
-/**
- * Searchs for matches in all rows of the board.
- * @returns the array with all found matches
- */
-function getAllRowMatches<T>(board: Board<T>): MatchResult<T> {
-    let matches: Piece<T>[] = [];
-    let effects: Effect<T>[] = [];
-    for (let i = 0; i < board.height; i++) {
+function FindAllColumnMatches<T>(board: Board<T>): MatchResult<T> {
+    let matches: TilePiece<T>[] = [];
+    let boardEffects: BoardEffect<T>[] = [];
+    for (let i = board.width; i >= 0; i--) {
         const checkedValues: T[] = [];
-        const elementsInRow = getAllPiecesInRow(board, i);
-        for (const element of elementsInRow) {
+        const elementsInColumn = FindAllTilePiecesInColumn(board, i);
+        for (const element of elementsInColumn) {
             if (!checkedValues.includes(element.value)) {
                 checkedValues.push(element.value);
-                const result = rowDeepNeighbourCheck(board, element);
+                const result = AllNeighboursInColCheck(board, element);
                 matches = matches.concat(result.matches);
-                effects = effects.concat(result.effects);
+                boardEffects = boardEffects.concat(result.boardEffects);
             }
         }
     }
     return {
         matches,
-        effects,
+        boardEffects,
     };
 }
 
-/**
- * Searches for matches on the left and right of the given element. And fires event when enabled.
- * @param startPiece the given start element
- * @returns the empty array or array with all matched elements
- */
-function rowDeepNeighbourCheck<T>(
+function FindAllTilePiecesInColumn<T>(board: Board<T>, columnIndex: number) {
+    return board.tilePieces.filter((element) => {
+        return element.position.col === columnIndex;
+    });
+}
+
+function ShiftElementsInColumn<T>(
     board: Board<T>,
-    startPiece: Piece<T>
+    fromRow: number,
+    col: number
+): void {
+    for (let row = fromRow; row > 0; row--) {
+        SwapPieces(board, { row, col }, { row: row - 1, col });
+    }
+}
+
+function FindNextPiecePosition<T>(
+    currentPiece: TilePiece<T>,
+    direction: DIRECTION
+) {
+    let position: Position = {
+        row: currentPiece.position.row,
+        col: currentPiece.position.col,
+    };
+    if (direction === DIRECTION.DOWN) {
+        position.row += 1;
+    }
+
+    if (direction === DIRECTION.UP) {
+        position.row -= 1;
+    }
+
+    if (direction === DIRECTION.LEFT) {
+        position.col -= 1;
+    }
+
+    if (direction === DIRECTION.RIGHT) {
+        position.col += 1;
+    }
+    return position;
+}
+
+function AllNeighboursInColCheck<T>(
+    board: Board<T>,
+    startPiece: TilePiece<T>
 ): MatchResult<T> {
-    const leftSideElements = neighourCheck(
-        board,
-        findPieceOnPosition(
-            board,
-            findNextPiecePosition(startPiece, CHECK_DIRECTION.LEFT)
-        ),
-        [],
-        startPiece.value,
-        CHECK_DIRECTION.LEFT
+    const nextTopPosition = FindNextPiecePosition(
+        startPiece,
+        DIRECTION.UP
     );
-    const rightSideElements = neighourCheck(
+    const pieceOnNextTopPosition = FindTilePieceOnPosition(board, nextTopPosition);
+    const topElements = CheckNeighbours(
         board,
-        findPieceOnPosition(
+        pieceOnNextTopPosition,
+        [],
+        startPiece.value,
+        DIRECTION.UP
+    );
+    const downElements = CheckNeighbours(
+        board,
+        FindTilePieceOnPosition(
             board,
-            findNextPiecePosition(startPiece, CHECK_DIRECTION.RIGHT)
+            FindNextPiecePosition(startPiece, DIRECTION.DOWN)
         ),
         [],
         startPiece.value,
-        CHECK_DIRECTION.RIGHT
+        DIRECTION.DOWN
+    );
+
+    if (topElements.length + downElements.length + 1 >= 3) {
+        const matchedPieces = [...topElements, startPiece, ...downElements];
+        return CreateBoardEffectForMatch(matchedPieces);
+    }
+
+    return {
+        boardEffects: [],
+        matches: [],
+    };
+}
+
+function CheckNeighbours<T>(
+    board: Board<T>,
+    currentPiece: TilePiece<T>,
+    matchingPieces: TilePiece<T>[],
+    value: T,
+    Direction: DIRECTION
+) {
+    if (!currentPiece) {
+        return matchingPieces;
+    }
+    if (currentPiece.value === value) {
+        matchingPieces.push(currentPiece);
+        const nextPiece = FindTilePieceOnPosition(
+            board,
+            FindNextPiecePosition(currentPiece, Direction)
+        );
+        CheckNeighbours(board, nextPiece, matchingPieces, value, Direction);
+    }
+    return matchingPieces;
+}
+
+function IsMoveLegal<T>(
+    board: Board<T>,
+    originalPosition: Position,
+    newPosition: Position
+): boolean {
+    if (
+        !IsPositionOutsideBoard(board, originalPosition) ||
+        !IsPositionOutsideBoard(board, newPosition)
+    ) {
+        return false;
+    }
+    if (
+        originalPosition.col === newPosition.col &&
+        originalPosition.row === newPosition.row
+    ) {
+        return false;
+    }
+
+    if (
+        originalPosition.col !== newPosition.col &&
+        originalPosition.row !== newPosition.row
+    ) {
+        return false;
+    }
+
+    SwapPieces(board, originalPosition, newPosition);
+    const matchesInRows = FindAllRowMatches(board);
+    const matchesInColumns = FindAllColumnMatches(board);
+    SwapPieces(board, originalPosition, newPosition);
+
+    if (!matchesInRows.matches.length && !matchesInColumns.matches.length) {
+        return false;
+    }
+    return true;
+}
+
+function CheckBoard<T>(
+    board: Board<T>,
+    generator: Generator<T>,
+    effects: BoardEffect<T>[],
+    removeMatchesFn: RemoveMatches<T>
+): void {
+    const rowMatchResults = FindAllRowMatches(board);
+    const columnMatchResults = FindAllColumnMatches(board);
+    effects.push(...rowMatchResults.boardEffects);
+    effects.push(...columnMatchResults.boardEffects);
+    if (rowMatchResults.matches.length || columnMatchResults.matches.length) {
+        removeMatchesFn(rowMatchResults.matches, columnMatchResults.matches);
+        UpdateBoard(board, generator, effects);
+    }
+}
+
+function FindAllRowMatches<T>(board: Board<T>): MatchResult<T> {
+    let matches: TilePiece<T>[] = [];
+    let boardEffects: BoardEffect<T>[] = [];
+    for (let i = 0; i < board.height; i++) {
+        const checkedValues: T[] = [];
+        const elementsInRow = FindAllTilePiecesInRow(board, i);
+        for (const element of elementsInRow) {
+            if (!checkedValues.includes(element.value)) {
+                checkedValues.push(element.value);
+                const result = AllNeighboursInRowCheck(board, element);
+                matches = matches.concat(result.matches);
+                boardEffects = boardEffects.concat(result.boardEffects);
+            }
+        }
+    }
+    return {
+        matches,
+        boardEffects,
+    };
+}
+
+function AllNeighboursInRowCheck<T>(
+    board: Board<T>,
+    startPiece: TilePiece<T>
+): MatchResult<T> {
+    const leftSideElements = CheckNeighbours(
+        board,
+        FindTilePieceOnPosition(
+            board,
+            FindNextPiecePosition(startPiece, DIRECTION.LEFT)
+        ),
+        [],
+        startPiece.value,
+        DIRECTION.LEFT
+    );
+    const rightSideElements = CheckNeighbours(
+        board,
+        FindTilePieceOnPosition(
+            board,
+            FindNextPiecePosition(startPiece, DIRECTION.RIGHT)
+        ),
+        [],
+        startPiece.value,
+        DIRECTION.RIGHT
     );
 
     if (leftSideElements.length + rightSideElements.length + 1 >= 3) {
@@ -305,96 +357,25 @@ function rowDeepNeighbourCheck<T>(
             startPiece,
             ...rightSideElements,
         ];
-        return generateMatchEffect(matchedPieces);
+        return CreateBoardEffectForMatch(matchedPieces);
     }
 
     return {
-        effects: [],
+        boardEffects: [],
         matches: [],
     };
 }
 
-/**
- * A recursive function that goes to the given direction of the given element and compares its value.
- * When values are the same it is added to the given array and the process repeats until invalid value or end of the board reached.
- * @param currentPiece the current checking piece
- * @param matchingPieces the array with all found matches until now
- * @param value the given value to compare with
- * @param checkDirection the checking process direction
- * @returns the array with all found matches
- */
-function neighourCheck<T>(
-    board: Board<T>,
-    currentPiece: Piece<T>,
-    matchingPieces: Piece<T>[],
-    value: T,
-    checkDirection: CHECK_DIRECTION
-) {
-    if (!currentPiece) {
-        return matchingPieces;
-    }
-    if (currentPiece.value === value) {
-        matchingPieces.push(currentPiece);
-        const nextPiece = findPieceOnPosition(
-            board,
-            findNextPiecePosition(currentPiece, checkDirection)
-        );
-        neighourCheck(board, nextPiece, matchingPieces, value, checkDirection);
-    }
-    return matchingPieces;
-}
-
-/**
- * Searchs for matches in all rows of the board.
- * @returns the array with all found matches
- */
-function getAllPiecesInRow<T>(board: Board<T>, rowIndex: number) {
-    return board.pieces.filter((element) => {
+function FindAllTilePiecesInRow<T>(board: Board<T>, rowIndex: number) {
+    return board.tilePieces.filter((element) => {
         return element.position.row === rowIndex;
     });
 }
 
-/**
- * Returns all elements for the given column
- * @param columnIndex The column index from which elements will be returned
- * @returns All the elements in the given column
- */
-function getAllPiecesInColumn<T>(board: Board<T>, columnIndex: number) {
-    return board.pieces.filter((element) => {
-        return element.position.col === columnIndex;
-    });
-}
 
-/* -------------------------------------------------------------------------- */
-/*                               HELPERS / UTILS                              */
-/* -------------------------------------------------------------------------- */
-
-/**
- * Scans the board to find all matches, removes them and calls a recursive refill function
- */
-function scanBoard<T>(
-    board: Board<T>,
-    generator: Generator<T>,
-    effects: Effect<T>[]
-): void {
-    const rowMatchResults = getAllRowMatches(board);
-    const columnMatchResults = getAllColumnMatches(board);
-    effects.push(...rowMatchResults.effects);
-    effects.push(...columnMatchResults.effects);
-    if (rowMatchResults.matches.length || columnMatchResults.matches.length) {
-        removedMatchedValues(rowMatchResults.matches, columnMatchResults.matches);
-        refillBoard(board, generator, effects);
-    }
-}
-
-/**
- *
- * @param matchedPieces Generates move effect based on given pieces
- * @returns Generated effect
- */
-function generateMatchEffect<T>(matchedPieces: Piece<T>[]) {
+function CreateBoardEffectForMatch<T>(matchedPieces: TilePiece<T>[]) {
     return {
-        effects: [
+        boardEffects: [
             {
                 kind: `Match`,
                 match: {
@@ -407,14 +388,10 @@ function generateMatchEffect<T>(matchedPieces: Piece<T>[]) {
     };
 }
 
-/**
- * For each matched pieces sets value as undefined
- * @param matchesRows matched pieces in rows
- * @param matchesColumn matched pieces in columns
- */
-function removedMatchedValues<T>(
-    matchesRows: Piece<T>[],
-    matchesColumn: Piece<T>[]
+
+function MatchValuesRemoved<T>(
+    matchesRows: TilePiece<T>[],
+    matchesColumn: TilePiece<T>[]
 ): void {
     matchesRows.forEach((match) => {
         match.value = undefined;
@@ -424,54 +401,7 @@ function removedMatchedValues<T>(
     });
 }
 
-/**
- * Checks if move is legal according to the game rules
- * @param firstPosition the postion of the first element
- * @param secondPosition the position of the second element
- * @returns boolean value based on the move legal state
- */
-function isMoveLegal<T>(
-    board: Board<T>,
-    firstPosition: Position,
-    secondPosition: Position
-): boolean {
-    if (
-        !isPositionOutsideBoard(board, firstPosition) ||
-        !isPositionOutsideBoard(board, secondPosition)
-    ) {
-        return false;
-    }
-    if (
-        firstPosition.col === secondPosition.col &&
-        firstPosition.row === secondPosition.row
-    ) {
-        return false;
-    }
-
-    if (
-        firstPosition.col !== secondPosition.col &&
-        firstPosition.row !== secondPosition.row
-    ) {
-        return false;
-    }
-
-    swapPieces(board, firstPosition, secondPosition);
-    const matchesInRows = getAllRowMatches(board);
-    const matchesInColumns = getAllColumnMatches(board);
-    swapPieces(board, firstPosition, secondPosition);
-
-    if (!matchesInRows.matches.length && !matchesInColumns.matches.length) {
-        return false;
-    }
-    return true;
-}
-
-/**
- * Checks is the given postion is outside of the generated board
- * @param p the given position
- * @returns boolean value based on the check state
- */
-function isPositionOutsideBoard<T>(board: Board<T>, p: Position): boolean {
+function IsPositionOutsideBoard<T>(board: Board<T>, p: Position): boolean {
     if (p.col >= board.width || p.col < 0) {
         return false;
     }
@@ -482,23 +412,19 @@ function isPositionOutsideBoard<T>(board: Board<T>, p: Position): boolean {
     return true;
 }
 
-/**
- * Finds elements on given position and swaps their values based on the fuction patched to pieces array
- * @param first position of the first element
- * @param second position of th second element
- */
-function swapPieces<T>(board: Board<T>, first: Position, second: Position) {
-    const firstPiece = findPieceOnPosition(board, first);
-    const secondPiece = findPieceOnPosition(board, second);
+function SwapPieces<T>(board: Board<T>, first: Position, second: Position) {
+    const firstPiece = FindTilePieceOnPosition(board, first);
+    const secondPiece = FindTilePieceOnPosition(board, second);
 
-    const firstIndex = board.pieces.indexOf(firstPiece);
-    const secondIndex = board.pieces.indexOf(secondPiece);
+    const firstIndex = board.tilePieces.indexOf(firstPiece);
+    const secondIndex = board.tilePieces.indexOf(secondPiece);
 
-    (board.pieces as any).swapProperties(firstIndex, secondIndex, `value`);
+    (board.tilePieces as any).swapProperties(firstIndex, secondIndex, `value`);
 }
 
-function findPieceOnPosition<T>(board: Board<T>, position: Position) {
-    return board.pieces.find((element) => {
+function FindTilePieceOnPosition<T>(board: Board<T>, position: Position) {
+
+    return board.tilePieces.find((element: TilePiece<T>) => {
         return (
             element.position.col == position.col &&
             element.position.row == position.row
@@ -506,15 +432,12 @@ function findPieceOnPosition<T>(board: Board<T>, position: Position) {
     });
 }
 
-/**
- * Fills the board with inital values given by the generator
- */
-function initBoardFill<T>(
+function Init<T>(
     generator: Generator<T>,
     height: number,
     width: number
-): Piece<T>[] {
-    const pieces: Piece<T>[] = [];
+): TilePiece<T>[] {
+    const pieces: TilePiece<T>[] = [];
     for (let row = 0; row < height; row++) {
         for (let col = 0; col < width; col++) {
             pieces.push({
@@ -527,7 +450,6 @@ function initBoardFill<T>(
         }
     }
 
-    // Monkey patched function to pieces object
     (pieces as any).swapProperties = (
         firstIndex: number,
         secondIndex: number,
